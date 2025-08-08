@@ -457,7 +457,7 @@
 <div class="modal" id="uploadModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
   <div class="modal-content">
     <h2 id="modalTitle">Postar Reels</h2>
-    <input type="file" id="videoFile" accept="video/mp4,video/webm" aria-label="Selecionar arquivo de vídeo" />
+    <input type="url" id="videoURL" placeholder="Link direto do vídeo (mp4/webm)" aria-label="URL do vídeo" />
     <input type="text" id="username" placeholder="Seu usuário" aria-label="Nome do usuário" />
     <textarea id="caption" placeholder="Legenda" rows="3" aria-label="Legenda do vídeo"></textarea>
     <button id="postBtn">Postar</button>
@@ -497,10 +497,12 @@
   const chatSendBtn = document.getElementById('chatSendBtn');
   const userIconImg = document.getElementById('userIcon');
   const userNameText = document.getElementById('userNameText');
-
   const iconUploadModal = document.getElementById('iconUploadModal');
   const iconFileInput = document.getElementById('iconFile');
   const iconSaveBtn = document.getElementById('iconSaveBtn');
+  const videoURLInput = document.getElementById('videoURL');
+  const usernameInput = document.getElementById('username');
+  const captionInput = document.getElementById('caption');
 
   let reels = [];
   let likes = {};
@@ -687,9 +689,10 @@
     }
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
-    document.getElementById('videoFile').value = '';
-    document.getElementById('username').value = loggedUser;
-    document.getElementById('caption').value = '';
+    videoURLInput.value = '';
+    usernameInput.value = loggedUser;
+    captionInput.value = '';
+    videoURLInput.focus();
   };
 
   modal.onclick = e => {
@@ -700,21 +703,24 @@
   };
 
   postBtn.onclick = () => {
-    const fileInput = document.getElementById('videoFile');
-    const username = document.getElementById('username').value.trim();
-    const caption = document.getElementById('caption').value.trim();
-    if (fileInput.files.length === 0) {
-      alert('Por favor, selecione um arquivo de vídeo.');
+    const videoURL = videoURLInput.value.trim();
+    const username = usernameInput.value.trim();
+    const caption = captionInput.value.trim();
+    if (!videoURL) {
+      alert('Por favor, insira um link válido de vídeo (mp4 ou webm).');
       return;
     }
     if (!username) {
       alert('Por favor, informe seu nome de usuário.');
       return;
     }
-    const file = fileInput.files[0];
-    const url = URL.createObjectURL(file);
+    // Checar se link parece válido (extensão simples)
+    if (!videoURL.match(/\.(mp4|webm)(\?.*)?$/i)) {
+      alert('O link deve ser um arquivo de vídeo mp4 ou webm válido.');
+      return;
+    }
     const id = Date.now().toString();
-    reels.unshift({ id, video: url, user: username, caption });
+    reels.unshift({ id, video: videoURL, user: username, caption });
     likes[id] = [];
     comments[id] = [];
     saveState();
