@@ -508,423 +508,303 @@
   let loggedUser = null;
   let userIcons = {}; // { username: base64string }
   let current = 0;
-  let isTransitioning = false;
-  let filteredReels = [];
-  let videos = [];
-  let chatCurrentId = null;
+// Pré-carregar alguns reels exemplo (links públicos free para RPG)
+const sampleReels = [
+  {
+    video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm',
+    user: 'rpgmaster',
+    caption: 'Explorando masmorras épicas! #RPG #Dungeon',
+  },
+  {
+    video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/bee.webm',
+    user: 'fantasyworld',
+    caption: 'Criando personagens incríveis para RPG! #Fantasy #RPG',
+  },
+  {
+    video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/tank.webm',
+    user: 'adventuretime',
+    caption: 'Batalhas intensas na campanha de hoje! #RPGBattle',
+  },
+];
 
-  // Função para salvar estado no localStorage
-  function saveState() {
-    localStorage.setItem('dragam_reels', JSON.stringify(reels));
-    localStorage.setItem('dragam_likes', JSON.stringify(likes));
-    localStorage.setItem('dragam_comments', JSON.stringify(comments));
-    localStorage.setItem('dragam_user', loggedUser || '');
-    localStorage.setItem('dragam_userIcons', JSON.stringify(userIcons));
-  }
+// Inicializa reels com os exemplos
+reels = sampleReels.slice();
+reels.forEach((r, i) => {
+  likes[i] = 0;
+  comments[i] = [];
+});
 
-  // Função para carregar estado do localStorage
-  function loadState() {
-    const reelsData = localStorage.getItem('dragam_reels');
-    if (reelsData) reels = JSON.parse(reelsData);
+// Função para renderizar reels no feed
+function renderReels() {
+  feed.innerHTML = '';
+  reels.forEach((reel, i) => {
+    const reelDiv = document.createElement('div');
+    reelDiv.className = 'reel';
+    reelDiv.style.transform = `translateY(${(i - current) * 100}vh)`;
+    reelDiv.setAttribute('data-index', i);
+    reelDiv.setAttribute('tabindex', '0');
+    reelDiv.setAttribute('aria-label', `Vídeo de ${reel.user}, legenda: ${reel.caption}`);
+    reelDiv.innerHTML = `
+      <video src="${reel.video}" preload="metadata" playsinline muted loop></video>
+      <div class="meta">
+        <div class="user">@${reel.user}</div>
+        <div class="caption">${reel.caption}</div>
+      </div>
+      <div class="actions">
+        <div class="action likeBtn" role="button" tabindex="0" aria-label="Curtir vídeo">
+          ❤️ <span class="count">${likes[i]}</span>
+        </div>
+        <div class="action commentBtn" role="button" tabindex="0" aria-label="Comentários">
+          💬
+        </div>
+      </div>
+      <div class="progress-wrap"><div class="progress"></div></div>
+    `;
+    feed.appendChild(reelDiv);
 
-    const likesData = localStorage.getItem('dragam_likes');
-    if (likesData) likes = JSON.parse(likesData);
+    const videoEl = reelDiv.querySelector('video');
+    videoEl.play();
 
-    const commentsData = localStorage.getItem('dragam_comments');
-    if (commentsData) comments = JSON.parse(commentsData);
+    // Like button
+    const likeBtn = reelDiv.querySelector('.likeBtn');
+    likeBtn.onclick = () => {
+      likes[i]++;
+      likeBtn.querySelector('.count').textContent = likes[i];
+    };
+    likeBtn.onkeypress = e => {
+      if (e.key === 'Enter' || e.key === ' ') likeBtn.onclick();
+    };
 
-    const userData = localStorage.getItem('dragam_user');
-    loggedUser = userData && userData.length > 0 ? userData : null;
+    // Comment button opens chat modal
+    const commentBtn = reelDiv.querySelector('.commentBtn');
+    commentBtn.onclick = () => openChat(i);
+    commentBtn.onkeypress = e => {
+      if (e.key === 'Enter' || e.key === ' ') commentBtn.onclick();
+    };
+  });
+  updateProgress();
+}
 
-    const iconsData = localStorage.getItem('dragam_userIcons');
-    if (iconsData) userIcons = JSON.parse(iconsData);
-  }
-
-  loadState();
-
-  // Ícone padrão genérico
-  const defaultUserIcon = 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
-
-  function getUserIcon(user) {
-    return userIcons[user] || defaultUserIcon;
-  }
-
-  function updateUserArea() {
-    if (loggedUser) {
-      userNameText.textContent = `@${loggedUser}`;
-      userIconImg.src = getUserIcon(loggedUser);
-      userIconImg.alt = `Ícone do usuário ${loggedUser}`;
-      userIconImg.style.cursor = 'pointer';
-      loginBtn.textContent = '🔓'; // logout icon
-      loginBtn.title = 'Deslogar usuário';
+// Atualiza barra de progresso do vídeo atual
+function updateProgress() {
+  const reelDivs = document.querySelectorAll('.reel');
+  reelDivs.forEach(div => {
+    const index = +div.getAttribute('data-index');
+    const video = div.querySelector('video');
+    const progressBar = div.querySelector('.progress');
+    if (index === current) {
+      video.ontimeupdate = () => {
+        const pct = (video.currentTime / video.duration) * 100;
+        progressBar.style.width = pct + '%';
+      };
     } else {
-      userNameText.textContent = 'Não logado';
-      userIconImg.src = defaultUserIcon;
-      userIconImg.alt = 'Ícone padrão usuário';
-      userIconImg.style.cursor = 'default';
-      loginBtn.textContent = '👤'; // login icon
-      loginBtn.title = 'Logar usuário';
-    }
-  }
-
-  updateUserArea();
-
-  // Renderiza os reels filtrados
-  function renderReels() {
-    filteredReels = reels.filter(r => {
-      if (!searchInput.value) return true;
-      return r.user.toLowerCase().includes(searchInput.value.toLowerCase());
-    });
-    if (filteredReels.length === 0) {
-      feed.innerHTML = '<p style="text-align:center; margin-top: 40vh; color: var(--muted);">Nenhum reel encontrado.</p>';
-      return;
-    }
-    if (current >= filteredReels.length) current = filteredReels.length - 1;
-    feed.innerHTML = '';
-    filteredReels.forEach((reel, i) => {
-      const reelDiv = document.createElement('div');
-      reelDiv.className = 'reel';
-      reelDiv.style.transform = `translateY(${(i - current) * 100}vh)`;
-      reelDiv.setAttribute('aria-hidden', i !== current);
-      const liked = likes[reel.id] && likes[reel.id].includes(loggedUser);
-      const likeCount = likes[reel.id]?.length || 0;
-      const commentCount = comments[reel.id]?.length || 0;
-
-      reelDiv.innerHTML = `
-        <div class="progress-wrap"><div class="progress"></div></div>
-        <video src="${reel.video}" playsinline loop muted></video>
-        <div class="meta">
-          <div class="user">@${reel.user}</div>
-          <div class="caption">${reel.caption}</div>
-        </div>
-        <div class="actions">
-          <div class="action like" role="button" tabindex="0" aria-label="Curtir vídeo" data-id="${reel.id}">
-            ❤
-            <span class="count">${likeCount}</span>
-          </div>
-          <div class="action comment" role="button" tabindex="0" aria-label="Comentários" data-id="${reel.id}">
-            💬
-            <span class="count">${commentCount}</span>
-          </div>
-        </div>
-      `;
-      feed.appendChild(reelDiv);
-    });
-    videos = [...document.querySelectorAll('video')];
-    updatePlayState();
-  }
-
-  function updatePlayState() {
-    videos.forEach((v, i) => {
-      const progress = feed.children[i].querySelector('.progress');
-      if (i === current) {
-        v.play().catch(() => {});
-        v.ontimeupdate = () => {
-          if (v.duration) progress.style.width = (v.currentTime / v.duration) * 100 + '%';
-        };
-      } else {
-        v.pause();
-        v.currentTime = 0;
-        progress.style.width = '0%';
-      }
-      feed.children[i].setAttribute('aria-hidden', i !== current);
-    });
-    feed.childNodes.forEach((el, i) => {
-      el.style.transform = `translateY(${(i - current) * 100}vh)`;
-    });
-    feed.setAttribute('aria-label', `Reels ${current + 1} de ${filteredReels.length}`);
-  }
-
-  function changeReel(newIndex) {
-    if (isTransitioning || newIndex < 0 || newIndex >= filteredReels.length) return;
-    isTransitioning = true;
-    current = newIndex;
-    updatePlayState();
-    setTimeout(() => {
-      isTransitioning = false;
-    }, 500);
-  }
-
-  // Eventos teclado
-  window.addEventListener('keydown', e => {
-    if (e.key === 'ArrowDown') changeReel(current + 1);
-    if (e.key === 'ArrowUp') changeReel(current - 1);
-  });
-
-  // Swipe mobile
-  let startY = null;
-  let startTime = 0;
-  feed.addEventListener('touchstart', e => {
-    if (e.touches.length === 1) {
-      startY = e.touches[0].clientY;
-      startTime = Date.now();
+      const progressBar = div.querySelector('.progress');
+      if (progressBar) progressBar.style.width = '0%';
+      if (video) video.ontimeupdate = null;
     }
   });
-  feed.addEventListener('touchend', e => {
-    if (startY === null) return;
-    const endY = e.changedTouches[0].clientY;
-    const dy = endY - startY;
-    const dt = Date.now() - startTime;
-    if (Math.abs(dy) > 50 && dt < 600) {
-      if (dy < 0) changeReel(current + 1);
-      else changeReel(current - 1);
-    }
-    startY = null;
+}
+
+// Navegação entre reels via teclado e wheel
+function changeReel(newIndex) {
+  if (newIndex < 0 || newIndex >= reels.length) return;
+  current = newIndex;
+  const reelDivs = document.querySelectorAll('.reel');
+  reelDivs.forEach(div => {
+    const index = +div.getAttribute('data-index');
+    div.style.transform = `translateY(${(index - current) * 100}vh)`;
   });
+  updateProgress();
+}
 
-  // Scroll roda mouse
-  feed.addEventListener('wheel', e => {
-    if (isTransitioning) return;
-    if (e.deltaY > 30) changeReel(current + 1);
-    else if (e.deltaY < -30) changeReel(current - 1);
-  }, { passive: true });
+// Eventos para navegação
+feed.addEventListener('wheel', e => {
+  if (e.deltaY > 0) changeReel(current + 1);
+  else if (e.deltaY < 0) changeReel(current - 1);
+});
+document.addEventListener('keydown', e => {
+  if (document.activeElement === chatInput) return; // não interferir ao digitar
+  if (e.key === 'ArrowDown') changeReel(current + 1);
+  else if (e.key === 'ArrowUp') changeReel(current - 1);
+});
 
-  // Botões header
-  addBtn.onclick = () => {
-    if (!loggedUser) {
-      alert('Você precisa estar logado para postar.');
-      return;
-    }
+// Abrir modal postar reels
+addBtn.onclick = () => {
+  if (!loggedUser) alert('Por favor, faça login primeiro clicando no ícone de usuário.');
+  else {
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
-    document.getElementById('videoFile').value = '';
-    document.getElementById('username').value = loggedUser;
-    document.getElementById('caption').value = '';
-  };
-
-  modal.onclick = e => {
-    if (e.target === modal) {
-      modal.classList.remove('open');
-      modal.setAttribute('aria-hidden', 'true');
-    }
-  };
-
-  postBtn.onclick = () => {
-    const fileInput = document.getElementById('videoFile');
-    const username = document.getElementById('username').value.trim();
-    const caption = document.getElementById('caption').value.trim();
-    if (fileInput.files.length === 0) {
-      alert('Por favor, selecione um arquivo de vídeo.');
-      return;
-    }
-    if (!username) {
-      alert('Por favor, informe seu nome de usuário.');
-      return;
-    }
-    const file = fileInput.files[0];
-    const url = URL.createObjectURL(file);
-    const id = Date.now().toString();
-    reels.unshift({ id, video: url, user: username, caption });
-    likes[id] = [];
-    comments[id] = [];
-    saveState();
-    modal.classList.remove('open');
-    modal.setAttribute('aria-hidden', 'true');
-    current = 0;
+  }
+};
+// Fechar modais ao clicar fora
+document.querySelectorAll('.modal').forEach(m => {
+  m.addEventListener('click', e => {
+    if (e.target === m) closeModals();
+  });
+});
+function closeModals() {
+  document.querySelectorAll('.modal').forEach(m => {
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden', 'true');
+  });
+}
+// Postar reels
+postBtn.onclick = () => {
+  const fileInput = document.getElementById('videoFile');
+  const usernameInput = document.getElementById('username');
+  const captionInput = document.getElementById('caption');
+  if (!fileInput.files.length) {
+    alert('Selecione um vídeo!');
+    return;
+  }
+  if (!usernameInput.value.trim()) {
+    alert('Informe seu nome de usuário!');
+    return;
+  }
+  const file = fileInput.files[0];
+  const reader = new FileReader();
+  reader.onload = () => {
+    reels.push({
+      video: reader.result,
+      user: usernameInput.value.trim(),
+      caption: captionInput.value.trim(),
+    });
+    likes[reels.length - 1] = 0;
+    comments[reels.length - 1] = [];
+    usernameInput.value = '';
+    captionInput.value = '';
+    fileInput.value = '';
+    closeModals();
+    current = reels.length - 1;
     renderReels();
   };
+  reader.readAsDataURL(file);
+};
 
-  // Login simples
-  loginBtn.onclick = () => {
-    if (loggedUser) {
-      if (confirm(`Deseja deslogar ${loggedUser}?`)) {
-        loggedUser = null;
-        saveState();
-        updateUserArea();
-        renderReels();
-      }
-      return;
-    }
-    const user = prompt('Digite seu nome de usuário para logar:');
-    if (user && user.trim().length > 0) {
-      loggedUser = user.trim();
-      saveState();
-      updateUserArea();
+// Login / Logout
+loginBtn.onclick = () => {
+  if (loggedUser) {
+    if (confirm('Deseja sair?')) {
+      loggedUser = null;
+      userNameText.textContent = 'Não logado';
+      userIconImg.src = '';
       renderReels();
     }
-  };
-
-  // Alterar ícone do usuário ao clicar na imagem
-  userIconImg.onclick = () => {
-    if (!loggedUser) {
-      alert('Você precisa estar logado para alterar o ícone.');
-      return;
+  } else {
+    const name = prompt('Digite seu nome de usuário:');
+    if (name && name.trim()) {
+      loggedUser = name.trim();
+      userNameText.textContent = loggedUser;
+      userIconImg.src = userIcons[loggedUser] || '';
+      renderReels();
     }
-    iconUploadModal.classList.add('open');
-    iconUploadModal.setAttribute('aria-hidden', 'false');
+  }
+};
+
+// Clicar no ícone para alterar avatar
+userIconImg.onclick = () => {
+  if (!loggedUser) {
+    alert('Faça login para alterar seu ícone!');
+    return;
+  }
+  iconUploadModal.classList.add('open');
+  iconUploadModal.setAttribute('aria-hidden', 'false');
+};
+
+// Salvar ícone de usuário
+iconSaveBtn.onclick = () => {
+  if (!iconFileInput.files.length) {
+    alert('Selecione uma imagem!');
+    return;
+  }
+  const file = iconFileInput.files[0];
+  const reader = new FileReader();
+  reader.onload = () => {
+    userIcons[loggedUser] = reader.result;
+    userIconImg.src = reader.result;
     iconFileInput.value = '';
-  };
-
-  // Fechar modais clicando fora do conteúdo
-  iconUploadModal.onclick = e => {
-    if (e.target === iconUploadModal) {
-      iconUploadModal.classList.remove('open');
-      iconUploadModal.setAttribute('aria-hidden', 'true');
-    }
-  };
-
-  // Salvar novo ícone do usuário
-  iconSaveBtn.onclick = () => {
-    if (iconFileInput.files.length === 0) {
-      alert('Por favor, selecione uma imagem.');
-      return;
-    }
-    const file = iconFileInput.files[0];
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      userIcons[loggedUser] = e.target.result; // base64
-      saveState();
-      updateUserArea();
-      iconUploadModal.classList.remove('open');
-      iconUploadModal.setAttribute('aria-hidden', 'true');
-      // Re-render chat messages para atualizar ícones se chat estiver aberto
-      if (chatCurrentId !== null) renderChatMessages();
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Like toggle e abrir chat
-  feed.addEventListener('click', e => {
-    const likeBtn = e.target.closest('.action.like');
-    const commentBtn = e.target.closest('.action.comment');
-    if (likeBtn) {
-      if (!loggedUser) {
-        alert('Você precisa estar logado para curtir.');
-        return;
-      }
-      const id = likeBtn.dataset.id;
-      if (!likes[id]) likes[id] = [];
-      const index = likes[id].indexOf(loggedUser);
-      if (index === -1) {
-        likes[id].push(loggedUser);
-        animateLike(likeBtn);
-      } else {
-        likes[id].splice(index, 1);
-      }
-      saveState();
-      renderReels();
-    }
-    if (commentBtn) {
-      if (!loggedUser) {
-        alert('Você precisa estar logado para comentar.');
-        return;
-      }
-      const id = commentBtn.dataset.id;
-      openChat(id);
-    }
-  });
-
-  // Animação like
-  function animateLike(button) {
-    button.style.transition = 'none';
-    button.style.transform = 'scale(1.6)';
-    setTimeout(() => {
-      button.style.transition = 'transform 0.3s ease';
-      button.style.transform = 'scale(1)';
-    }, 150);
-  }
-
-  // Chat funcionalidade
-  function openChat(id) {
-    chatCurrentId = id;
-    chatModal.classList.add('open');
-    chatModal.setAttribute('aria-hidden', 'false');
-    renderChatMessages();
-    chatInput.focus();
-  }
-
-  function closeChat() {
-    chatModal.classList.remove('open');
-    chatModal.setAttribute('aria-hidden', 'true');
-    chatInput.value = '';
-    chatCurrentId = null;
-  }
-
-  chatModal.addEventListener('click', e => {
-    if (e.target === chatModal) {
-      closeChat();
-    }
-  });
-
-  chatSendBtn.onclick = () => {
-    if (!loggedUser) return alert('Você precisa estar logado para comentar.');
-    const msg = chatInput.value.trim();
-    if (!msg) return;
-    if (!comments[chatCurrentId]) comments[chatCurrentId] = [];
-    comments[chatCurrentId].push({ user: loggedUser, text: msg, time: Date.now() });
-    saveState();
-    chatInput.value = '';
-    renderChatMessages();
-  };
-
-  chatInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      chatSendBtn.click();
-    }
-  });
-
-  // Renderiza as mensagens do chat com ícones
-  function renderChatMessages() {
-    if (!comments[chatCurrentId]) comments[chatCurrentId] = [];
-    chatMessages.innerHTML = '';
-    comments[chatCurrentId].forEach(c => {
-      const msgDiv = document.createElement('div');
-      msgDiv.className = 'message';
-
-      const icon = document.createElement('img');
-      icon.src = getUserIcon(c.user);
-      icon.alt = `Ícone de ${c.user}`;
-
-      const textSpan = document.createElement('div');
-      textSpan.className = 'text';
-      textSpan.textContent = `@${c.user}: ${c.text}`;
-
-      msgDiv.appendChild(icon);
-      msgDiv.appendChild(textSpan);
-      chatMessages.appendChild(msgDiv);
-    });
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
-
-  // Busca usuário
-  searchInput.addEventListener('input', () => {
-    current = 0;
+    closeModals();
     renderReels();
-  });
+  };
+  reader.readAsDataURL(file);
+};
 
-  // Carregar alguns reels iniciais sobre RPG para já ter conteúdo
-  if (reels.length === 0) {
-    const defaultRPGReels = [
-      {
-        id: 'rpg1',
-        video: 'https://cdn.coverr.co/videos/coverr-a-man-playing-dungeons-and-dragons-3420/1080p.mp4',
-        user: 'mestreRPG',
-        caption: 'Partida épica de D&D! #RPG #DnD'
-      },
-      {
-        id: 'rpg2',
-        video: 'https://cdn.coverr.co/videos/coverr-rolling-dice-in-board-game-3492/1080p.mp4',
-        user: 'jogadorLendario',
-        caption: 'A sorte está lançada! 🎲 #RPG'
-      },
-      {
-        id: 'rpg3',
-        video: 'https://cdn.coverr.co/videos/coverr-group-of-people-rolling-dice-3347/1080p.mp4',
-        user: 'grupoAventureiro',
-        caption: 'Juntos em mais uma aventura! #RPGFriends'
-      }
-    ];
-    reels = defaultRPGReels;
-    defaultRPGReels.forEach(r => {
-      likes[r.id] = [];
-      comments[r.id] = [];
-    });
-    saveState();
+// Abrir chat de comentários
+function openChat(index) {
+  if (!loggedUser) {
+    alert('Faça login para comentar!');
+    return;
   }
+  chatModal.classList.add('open');
+  chatModal.setAttribute('aria-hidden', 'false');
+  chatMessages.innerHTML = '';
+  comments[index].forEach(cmt => {
+    const div = document.createElement('div');
+    div.className = 'message';
+    div.innerHTML = `
+      <img src="${userIcons[cmt.user] || 'https://icons.iconarchive.com/icons/paomedia/small-n-flat/1024/user-male-icon.png'}" alt="Ícone do usuário ${cmt.user}" />
+      <div class="text"><strong>@${cmt.user}:</strong> ${cmt.text}</div>
+    `;
+    chatMessages.appendChild(div);
+  });
+  chatSendBtn.onclick = () => sendComment(index);
+  chatInput.value = '';
+  chatInput.focus();
+}
 
-  renderReels();
-  updateUserArea();
+// Enviar comentário
+function sendComment(index) {
+  const txt = chatInput.value.trim();
+  if (!txt) return;
+  comments[index].push({ user: loggedUser, text: txt });
+  const div = document.createElement('div');
+  div.className = 'message';
+  div.innerHTML = `
+    <img src="${userIcons[loggedUser] || 'https://icons.iconarchive.com/icons/paomedia/small-n-flat/1024/user-male-icon.png'}" alt="Ícone do usuário ${loggedUser}" />
+    <div class="text"><strong>@${loggedUser}:</strong> ${txt}</div>
+  `;
+  chatMessages.appendChild(div);
+  chatInput.value = '';
+  chatInput.focus();
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// Busca simples por usuário
+searchInput.oninput = () => {
+  const val = searchInput.value.trim().toLowerCase();
+  if (!val) {
+    renderReels();
+    return;
+  }
+  const filtered = reels.filter(r => r.user.toLowerCase().includes(val));
+  feed.innerHTML = '';
+  filtered.forEach((reel, i) => {
+    const reelDiv = document.createElement('div');
+    reelDiv.className = 'reel';
+    reelDiv.style.transform = `translateY(${i * 100}vh)`;
+    reelDiv.innerHTML = `
+      <video src="${reel.video}" preload="metadata" playsinline muted loop></video>
+      <div class="meta">
+        <div class="user">@${reel.user}</div>
+        <div class="caption">${reel.caption}</div>
+      </div>
+      <div class="actions">
+        <div class="action likeBtn" role="button" tabindex="0" aria-label="Curtir vídeo">
+          ❤️ <span class="count">${likes[i]}</span>
+        </div>
+        <div class="action commentBtn" role="button" tabindex="0" aria-label="Comentários">
+          💬
+        </div>
+      </div>
+      <div class="progress-wrap"><div class="progress"></div></div>
+    `;
+    feed.appendChild(reelDiv);
+  });
+};
+
+// Inicializa
+renderReels();
+
 </script>
 </body>
 </html>
